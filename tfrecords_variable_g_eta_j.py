@@ -59,8 +59,8 @@ test_labels = np.concatenate((test_labels1, test_labels2), axis=0)
 test_ids = np.concatenate((test_ids1, test_ids2), axis=0)
 
 
-slice_size = 900
-stride = 900
+slice_size = 300
+stride = 150
 start_index = 150
 
 full_train_im_arr = []
@@ -124,6 +124,6 @@ full_train_im_arr = full_train_im_arr.astype(np.float32)
 full_test_im_arr = full_test_im_arr.astype(np.float32)
 full_validation_im_arr = full_validation_im_arr.astype(np.float32)
 
-create_tfrecords(os.path.join(output_path,'training_data_ngj.tfrecord'), full_train_im_arr, full_train_label_arr)
-create_tfrecords(os.path.join(output_path, 'test_data_ngj.tfrecord'), full_test_im_arr, full_test_label_arr)
-create_tfrecords(os.path.join(output_path, 'validation_data_ngj.tfrecord'), full_validation_im_arr, full_validation_label_arr)
+create_tfrecords(os.path.join(output_path,'training_data_ngj_augmented.tfrecord'), full_train_im_arr, full_train_label_arr)
+create_tfrecords(os.path.join(output_path, 'test_data_ngj_augmented.tfrecord'), full_test_im_arr, full_test_label_arr)
+create_tfrecords(os.path.join(output_path, 'validation_data_ngj_augmented.tfrecord'), full_validation_im_arr, full_validation_label_arr)

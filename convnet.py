@@ -8,7 +8,6 @@ def normalize_input(x):
 
 def conv_relu_bn(x, kernel, strides, phase_train, padding='VALID'):
     """
-    Creates a conv-relu-bn block, given input x, kernel and strides.
     kernel format: [height, width, in_channels, out_channels]
     strides format: [height, width], MUST BE LIST
     """
@@ -35,7 +34,6 @@ def conv_relu_bn(x, kernel, strides, phase_train, padding='VALID'):
 
 def conv_relu(x, kernel, strides, phase_train, padding='VALID'):
     """
-    Creates a conv-relu-bn block, given input x, kernel and strides.
     kernel format: [height, width, in_channels, out_channels]
     strides format: [height, width], MUST BE LIST
     """
@@ -47,33 +45,12 @@ def conv_relu(x, kernel, strides, phase_train, padding='VALID'):
     return relu
 
 
-def fc_relu_bn(x, N_in, N_out, phase_train):
+def bn_fc_relu(x, N_in, N, phase_train, keep_prob=None):
     """
-
-    """
-    weights = tf.get_variable('weights', [N_in, N_out],
-                              initializer=tf.random_normal_initializer(stddev=0.001),
-                              regularizer=tf.nn.l2_loss)
-    fc_h = tf.matmul(x, weights, name='matmul')
-    relu = tf.nn.relu(fc_h, name='relu')
-    batch_mean, batch_var = tf.nn.moments(relu, [0], name='moments')
-    ema = tf.train.ExponentialMovingAverage(decay=0.99)
-    ema_apply_op = tf.cond(phase_train, lambda: ema.apply(
-        [batch_mean, batch_var]), lambda: tf.no_op())
-    with tf.control_dependencies([ema_apply_op]):
-        mean = tf.cond(phase_train, lambda: batch_mean, lambda: ema.average(batch_mean))
-        var = tf.cond(phase_train, lambda: batch_var, lambda: ema.average(batch_var))
-
-    beta = tf.Variable(tf.constant(0.0, shape=[N_out]), name='beta', trainable=True)
-    gamma = tf.Variable(tf.constant(1.0, shape=[N_out]), name='gamma', trainable=True)
-    batch_norm = tf.nn.batch_normalization(
-        relu, mean, var, beta, gamma, 1e-3, name='batch_normalization')
-    return batch_norm
-
-
-def bn_fc_relu(x, N_in, N_out, phase_train, keep_prob=None):
-    """
-
+    N_in: number of neurons in previous layer
+    N: number of neurons in this layer
+    kernel format: [height, width, in_channels, out_channels]
+    strides format: [height, width], MUST BE LIST
     """
     batch_mean, batch_var = tf.nn.moments(x, [0], name='moments')
     ema = tf.train.ExponentialMovingAverage(decay=0.99)
@@ -87,7 +64,7 @@ def bn_fc_relu(x, N_in, N_out, phase_train, keep_prob=None):
     gamma = tf.Variable(tf.constant(1.0, shape=[N_in]), name='gamma', trainable=True)
     batch_norm = tf.nn.batch_normalization(
         x, mean, var, beta, gamma, 1e-3, name='batch_normalization')
-    weights = tf.get_variable('weights', [N_in, N_out],
+    weights = tf.get_variable('weights', [N_in, N],
                               initializer=tf.random_normal_initializer(stddev=0.001),
                               regularizer=tf.nn.l2_loss)
     fc_h = tf.matmul(batch_norm, weights, name='matmul')
@@ -99,11 +76,8 @@ def bn_fc_relu(x, N_in, N_out, phase_train, keep_prob=None):
         return dropout
 
 
-def fc_relu(x, N_in, N_out, phase_train=None):
-    """
-
-    """
-    weights = tf.get_variable('weights', [N_in, N_out],
+def fc_relu(x, N_in, N, phase_train=None):
+    weights = tf.get_variable('weights', [N_in, N],
                               initializer=tf.random_normal_initializer(stddev=0.001),
                               regularizer=tf.nn.l2_loss)
     fc_h = tf.matmul(x, weights, name='matmul')
@@ -125,33 +99,12 @@ def max_pool(x, ksize, strides, padding='VALID', flatten=False):
     else:
         return max_pool
 
-
-def output(x, N_in, N_out, phase_train):
-    # batch_mean, batch_var = tf.nn.moments(x, [0], name='moments')
-    # ema = tf.train.ExponentialMovingAverage(decay=0.5)
-    # ema_apply_op = tf.cond(phase_train, lambda: ema.apply([batch_mean, batch_var]), lambda:tf.no_op())
-    # with tf.control_dependencies([ema_apply_op]):
-    #     mean = tf.cond(phase_train, lambda:batch_mean, lambda:ema.average(batch_mean))
-    #     var = tf.cond(phase_train, lambda:batch_var, lambda:ema.average(batch_var))
-    # beta = tf.Variable(tf.constant(0.0, shape=[N_in]), name='beta', trainable=True)
-    # gamma = tf.Variable(tf.constant(1.0, shape=[N_in]), name='gamma', trainable=True)
-    # batch_norm = tf.nn.batch_normalization(x, mean, var, beta, gamma, 1e-3, name='batch_normalization')
-
-    weights = tf.get_variable('weights', [N_in, N_out],
+def output(x, N_in, N, phase_train):
+    weights = tf.get_variable('weights', [N_in, N],
                               initializer=tf.random_normal_initializer(stddev=0.001))
-    bias = tf.get_variable('bias', [N_out])
+    bias = tf.get_variable('bias', [N])
     y = tf.matmul(x, weights, name='output') + bias
     return y
-
-
-def softmax(x, N_in):
-    weights = tf.get_variable('weights', [N_in, 8],
-                              initializer=tf.random_normal_initializer(stddev=0.001))
-    bias = tf.get_variable('bias', [8])
-    y = tf.matmul(x, weights, name='output') + bias
-    output = tf.nn.softmax(y, name='softmax')
-    return output
-
 
 def mse_loss(x, y):
     """
@@ -170,10 +123,6 @@ def mse_loss(x, y):
 
 
 def cross_entropy_loss(output, label):
-    """
-    y: labels
-    x: predictions
-    """
     with tf.variable_scope('loss'):
         loss = tf.nn.softmax_cross_entropy_with_logits_v2(
             labels=label, logits=output, name='softmax_cross_entropy')
@@ -184,7 +133,6 @@ def cross_entropy_loss(output, label):
     tf.summary.scalar('test_loss', streaming_loss, collections=['test_summaries'])
     tf.summary.scalar('validation_loss', streaming_loss, collections=['validation_summaries'])
     return loss
-
 
 def accuracy(x, y, j=False):
     """
@@ -262,129 +210,38 @@ def softmax_accuracy(x, y):
     return accuracy
 
 
-def inference_shallow(x, phase_train, keep_prob, softmax=False):
-    with tf.variable_scope('ConvReluBN1'):
-        y = conv_relu_bn(x, kernel=[1, 8, 6, 256], strides=[1, 1],
-                         phase_train=phase_train, padding='SAME')
-    with tf.variable_scope('max_pool1'):
-        y = max_pool(y, [1, 1, 2, 1], [1, 1, 2, 1])
-    with tf.variable_scope('ConvReluBN2'):
-        y = conv_relu_bn(y, kernel=[1, 3, 256, 512], strides=[1, 1],
-                         phase_train=phase_train, padding='SAME')
-    with tf.variable_scope('max_pool2'):
-        y = max_pool(y, [1, 1, 2, 1], [1, 1, 2, 1])
-    with tf.variable_scope('ConvReluBN3'):
-        y = conv_relu(y, kernel=[1, 3, 512, 1024], strides=[1, 1],
-                      phase_train=phase_train, padding='SAME')
-    with tf.variable_scope('max_pool3'):
-        y, length = max_pool(y, [1, 1, 2, 1], [1, 1, 2, 1], flatten=True)
-    with tf.variable_scope('BNDenseRelu1'):
-        size1 = 2048
-        y = bn_fc_relu(y, length, size1, phase_train=phase_train, keep_prob=keep_prob)
-    with tf.variable_scope('BNDenseRelu2'):
-        size2 = 2048
-        y = bn_fc_relu(y, size1, size2, phase_train=phase_train, keep_prob=None)
-    with tf.variable_scope('output'):
-        if softmax:
-            y = output(y, size2, 8, phase_train=phase_train)
-        else:
-            y = output(y, size2, 1, phase_train=phase_train)
-        return y
-
-
 def inference(x, phase_train, keep_prob, softmax=False):
     with tf.variable_scope('ConvReluBN1'):
-        y = conv_relu_bn(x, kernel=[1, 3, 6, 128], strides=[1, 1],
+        y = conv_relu_bn(x, kernel=[1, 12, 6, 256], strides=[1, 1],
                          phase_train=phase_train, padding='SAME')
     with tf.variable_scope('ConvReluBN2'):
-        y = conv_relu_bn(y, kernel=[1, 3, 128, 128], strides=[1, 1],
+        y = conv_relu_bn(y, kernel=[1, 3, 256, 256], strides=[1, 1],
                          phase_train=phase_train, padding='SAME')
     with tf.variable_scope('max_pool1'):
         y = max_pool(y, [1, 1, 2, 1], [1, 1, 2, 1])
     with tf.variable_scope('ConvReluBN3'):
-        y = conv_relu_bn(y, kernel=[1, 3, 128, 256], strides=[1, 1],
+        y = conv_relu_bn(y, kernel=[1, 3, 256, 512], strides=[1, 1],
                          phase_train=phase_train, padding='SAME')
     with tf.variable_scope('ConvReluBN4'):
-        y = conv_relu_bn(y, kernel=[1, 3, 256, 256], strides=[1, 1],
+        y = conv_relu_bn(y, kernel=[1, 3, 512, 512], strides=[1, 1],
                          phase_train=phase_train, padding='SAME')
+    with tf.variable_scope('max_pool2'):
+        y = max_pool(y, [1, 1, 2, 1], [1, 1, 2, 1])
     with tf.variable_scope('ConvReluBN5'):
-        y = conv_relu_bn(y, kernel=[1, 3, 256, 256], strides=[1, 1],
-                         phase_train=phase_train, padding='SAME')
-    with tf.variable_scope('max_pool2'):
-        y = max_pool(y, [1, 1, 2, 1], [1, 1, 2, 1])
+        y = conv_relu(y, kernel=[1, 3, 512, 512], strides=[1, 1],
+                      phase_train=phase_train, padding='SAME')
     with tf.variable_scope('ConvReluBN6'):
-        y = conv_relu_bn(y, kernel=[1, 3, 256, 512], strides=[1, 1],
-                         phase_train=phase_train, padding='SAME')
+        y = conv_relu(y, kernel=[1, 3, 512, 512], strides=[1, 1],
+                      phase_train=phase_train, padding='SAME')
+    with tf.variable_scope('max_pool3'):
+        y = max_pool(y, [1, 1, 2, 1], [1, 1, 2, 1])
     with tf.variable_scope('ConvReluBN7'):
-        y = conv_relu_bn(y, kernel=[1, 3, 512, 512], strides=[1, 1],
-                         phase_train=phase_train, padding='SAME')
+        y = conv_relu(y, kernel=[1, 3, 512, 1024], strides=[1, 1],
+                      phase_train=phase_train, padding='SAME')
     with tf.variable_scope('ConvReluBN8'):
-        y = conv_relu_bn(y, kernel=[1, 3, 512, 512], strides=[1, 1],
-                         phase_train=phase_train, padding='SAME')
-    with tf.variable_scope('max_pool3'):
-        y, length = max_pool(y, [1, 1, 2, 1], [1, 1, 2, 1], flatten=True)
-    with tf.variable_scope('BNDenseRelu1'):
-        size1 = 2048
-        y = bn_fc_relu(y, length, size1, phase_train=phase_train, keep_prob=keep_prob)
-    with tf.variable_scope('BNDenseRelu2'):
-        size2 = 2048
-        y = bn_fc_relu(y, size1, size2, phase_train=phase_train, keep_prob=None)
-    with tf.variable_scope('output'):
-        if softmax:
-            y = output(y, size2, 8, phase_train=phase_train)
-        else:
-            y = output(y, size2, 1, phase_train=phase_train)
-        return y
-    return y
-
-
-def inference_deep(x, phase_train, keep_prob, softmax=False):
-    y = normalize_input(x)
-    with tf.variable_scope('ConvReluBN1'):
-        y = conv_relu_bn(y, kernel=[1, 3, 6, 128], strides=[1, 1],
-                         phase_train=phase_train, padding='SAME')
-    # with tf.variable_scope('ConvReluBN2'):
-    #     y = conv_relu_bn(y, kernel=[1, 3, 128, 128], strides=[1, 1],
-    #                      phase_train=phase_train, padding='SAME')
-    with tf.variable_scope('max_pool1'):
-        y = max_pool(y, [1, 1, 2, 1], [1, 1, 2, 1])
-    with tf.variable_scope('ConvReluBN3'):
-        y = conv_relu_bn(y, kernel=[1, 3, 128, 256], strides=[1, 1],
-                         phase_train=phase_train, padding='SAME')
-    # with tf.variable_scope('ConvReluBN4'):
-    #     y = conv_relu_bn(y, kernel=[1, 3, 256, 256], strides=[1, 1],
-    #                      phase_train=phase_train, padding='SAME')
-    # with tf.variable_scope('ConvReluBN5'):
-    #     y = conv_relu_bn(y, kernel=[1, 3, 256, 256], strides=[1, 1],
-    #                      phase_train=phase_train, padding='SAME')
-    with tf.variable_scope('max_pool2'):
-        y = max_pool(y, [1, 1, 2, 1], [1, 1, 2, 1])
-    with tf.variable_scope('ConvReluBN6'):
-        y = conv_relu_bn(y, kernel=[1, 3, 256, 512], strides=[1, 1],
-                         phase_train=phase_train, padding='SAME')
-    # with tf.variable_scope('ConvReluBN7'):
-    #     y = conv_relu_bn(y, kernel=[1, 3, 512, 512], strides=[1, 1],
-    #                      phase_train=phase_train, padding='SAME')
-    # with tf.variable_scope('ConvReluBN8'):
-    #     y = conv_relu_bn(y, kernel=[1, 3, 512, 512], strides=[1, 1],
-    #                      phase_train=phase_train, padding='SAME')
-    with tf.variable_scope('max_pool3'):
-        y = max_pool(y, [1, 1, 2, 1], [1, 1, 2, 1])
-    # with tf.variable_scope('ConvReluBN9'):
-    #     y = conv_relu_bn(y, kernel=[1, 3, 512, 512], strides=[1, 1],
-    #                      phase_train=phase_train, padding='SAME')
-    # with tf.variable_scope('ConvReluBN10'):
-    #     y = conv_relu_bn(y, kernel=[1, 3, 512, 512], strides=[1, 1],
-    #                      phase_train=phase_train, padding='SAME')
-    with tf.variable_scope('ConvReluBN11'):
-        y = conv_relu_bn(y, kernel=[1, 3, 512, 512], strides=[1, 1],
+        y = conv_relu(y, kernel=[1, 3, 1024, 1024], strides=[1, 1],
                       phase_train=phase_train, padding='SAME')
     with tf.variable_scope('max_pool4'):
-        y = max_pool(y, [1, 1, 2, 1], [1, 1, 2, 1])
-    with tf.variable_scope('ConvReluBN12'):
-        y = conv_relu_bn(y, kernel=[1, 3, 512, 512], strides=[1, 1],
-                         phase_train=phase_train, padding='SAME')
-    with tf.variable_scope('max_pool5'):
         y, length = max_pool(y, [1, 1, 2, 1], [1, 1, 2, 1], flatten=True)
     with tf.variable_scope('BNDenseRelu1'):
         size1 = 2048
@@ -398,4 +255,3 @@ def inference_deep(x, phase_train, keep_prob, softmax=False):
         else:
             y = output(y, size2, 1, phase_train=phase_train)
         return y
-    return y

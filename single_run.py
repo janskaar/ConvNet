@@ -1,12 +1,12 @@
-from convnet import accuracy, mse_loss, inference, softmax_accuracy, cross_entropy_loss
+from convnet import accuracy, mse_loss, softmax_accuracy, cross_entropy_loss, inference
 from input_functions import load_datasets
 import tensorflow as tf
 import os, shutil, sys
 
-
 class Run():
     def __init__(self, training_path, test_path, validation_path, lab_index, savepath, lr, reg, keep_prob,
-                 save_step = 1, batch_size=100, length=300, load=False, softmax=False):
+                 save_step = 1, batch_size=100, length=300, load=False, softmax=False, decay=0.97, decay_step=400,
+                 momentum=0.9):
         self.label_index = lab_index                            ## 0 for eta, 1 for g, 2 for j
         self.workpath = os.path.join(savepath, 'workspace/')
         self.bestpath = os.path.join(savepath, 'best/')
@@ -14,7 +14,8 @@ class Run():
         self.test_path = test_path
         self.training_path = training_path
         self.validation_path = validation_path
-        self.lr = tf.Variable(lr, trainable=False, name='learning_rate')
+        # self.lr = tf.Variable(lr, trainable=False, name='learning_rate')
+        self.lr = lr
         self.reg = reg
         self.dropout = keep_prob
         self.save_epoch = 0
@@ -25,6 +26,10 @@ class Run():
         self.epoch = 0
         self.load = load
         self.softmax = softmax
+        self.p_best_loss = 10
+        self.decay_step = decay_step
+        self.decay = decay
+        self.momentum = momentum
         self.setup_graph()
 
     def setup_graph(self):
@@ -42,7 +47,7 @@ class Run():
                 self.y = tf.expand_dims(y[:, self.label_index], [1])
             x = tf.transpose(x, perm=[0, 3, 2, 1])
 
-        self.best_loss = tf.Variable(10, trainable=False, name='best_loss')
+        self.best_loss = tf.Variable(10, trainable=False, dtype=tf.float32, name='best_loss')
         self.phase_train = tf.placeholder(tf.bool, name='phase_train')
         self.keep_prob = tf.placeholder(tf.float32, name='keep_prob')
         self.output = inference(x, self.phase_train, self.keep_prob, softmax=self.softmax)
@@ -60,10 +65,18 @@ class Run():
 
         with tf.variable_scope('optimizer'):
             self.global_step = tf.Variable(0, trainable=False, name='global_step')
-            optimizer = tf.train.AdamOptimizer(name='adam_optimizer', learning_rate=self.lr)
+            self.lr = tf.train.exponential_decay(self.lr, self.global_step, self.decay_step,
+                                                 self.decay, name='learning_rate')
+            tf.summary.scalar('learning_rate', self.lr, collections=['training_summaries'])
+            # optimizer = tf.train.AdamOptimizer(name='adam_optimizer', learning_rate=self.lr, epsilon=self.epsilon,
+            #                                    beta1=self.beta1, beta2=self.beta2)
+            optimizer = tf.train.MomentumOptimizer(name='momentumoptimizer', learning_rate=self.lr, momentum=self.momentum,
+                                                   use_nesterov=True)
             self.optimize_step = optimizer.minimize(self.loss + self.reg*reg_sum, global_step=self.global_step)
 
         self.test_summaries = tf.summary.merge(tf.get_collection('test_summaries'))
+        sums = tf.get_collection('training_summaries')
+        print(sums)
         self.training_summaries = tf.summary.merge(tf.get_collection('training_summaries'))
         self.validation_summaries = tf.summary.merge(tf.get_collection('validation_summaries'))
         self.regularization_summaries = tf.summary.merge(reg_summaries)
@@ -71,17 +84,17 @@ class Run():
         self.running_metric_vars = tf.get_collection(tf.GraphKeys.LOCAL_VARIABLES, scope='running_metrics')
         self.running_metric_ops = tf.get_collection('running_metric_ops', scope='running_metrics')
         self.saver = tf.train.Saver()
-        self.writer = tf.summary.FileWriter(logdir=self.workpath, graph=tf.get_default_graph())
 
     def train(self):
         with tf.Session() as sess:
             if self.load:
                 self.load_best(sess)
+                self.writer = tf.summary.FileWriter(logdir=self.workpath)
+                self.report(sess)
             else:
                 sess.run(tf.global_variables_initializer())
+                self.writer = tf.summary.FileWriter(logdir=self.workpath, graph=tf.get_default_graph())
                 self.report(sess)
-
-            lr_counter = 0
             while True:
                 sess.run([self.train_init])
                 while True:
@@ -90,17 +103,11 @@ class Run():
                     except tf.errors.OutOfRangeError:
                         break
                 self.epoch += 1
-                lr_counter += 1
-                if lr_counter == 5:
-                    sess.run(tf.assign(self.lr, tf.divide(self.lr, 2)))
-                    lr_counter = 0
-                    if sess.run(self.lr) < 1e-10:
-                        lr_counter = 10
                 if self.epoch%self.save_step == 0:
                     self.report(sess)
-                    if self.epoch - self.save_epoch > 20 and self.atpt > 2:   ## First number is how long to go without reloading best results
-                        break                                                 ## Second number is how many times to reload
-                    if self.epoch - self.save_epoch > 20 and self.atpt <= 2:  ##
+                    if self.epoch - self.save_epoch > 20 and self.atpt > 1:
+                        break
+                    if self.epoch - self.save_epoch > 20 and self.atpt <= 1:
                         print('NEW ATTEMPT')
                         print('SAVE EPOCH', self.save_epoch)
                         self.writer.close()
@@ -151,16 +158,13 @@ class Run():
         self.writer.add_summary(test_results[-1], global_step=step)
         self.writer.add_summary(validation_results[-1], global_step=step)
         self.writer.add_summary(validation_results[-2], global_step=step)
-        if self.label_index != 2:
-            if test_results[0] < 0.05:         ## Loss at which to first start saving if not J,
-                self.save_step = 1
-        else:
-            if test_results[0] < 0.0005:        ## Loss for J
-                self.save_step = 1
-        if test_results[0] < sess.run(self.best_loss) and test_results[0] < 0.03:
+        bl = sess.run(self.best_loss)
+        print(bl)
+        if test_results[0] < bl and test_results[0] < 1.5:
             sess.run(tf.assign(self.best_loss, test_results[0]))
+            self.p_best_loss = bl
             self.save(sess)
-            self.atpt = 0
+            self.atpt = 1
 
     def save(self, sess):
         print('New best, saving and copying files')
@@ -214,22 +218,6 @@ class Run():
                 'Test: ', test[0], test[1], test[2], test[3]))
             print('{:<12s}{:<12.6f}{:<12.4f}{:<12.4f}{:<12.4f}'.format(
                 'Validation: ', val[0], val[1], val[2], val[3]))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
