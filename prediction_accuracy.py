@@ -1,7 +1,7 @@
 import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
-from convnet import inference_deep, mse_loss
+from convnet import inference_shallow, mse_loss
 from input_functions import load_datasets
 import os
 
@@ -93,5 +93,5 @@ print(n_notthirty, n_notsix)
 print(np.mean(train_accuracy_arr)**2, avg_train_loss)
 print(np.mean(test_accuracy_arr)**2, avg_test_loss)
 
-np.save(os.path.join(output_folder, 'training_accuracy_'+paramname), train_accuracy_arr)
-np.save(os.path.join(output_folder, 'test_accuracy_'+paramname), test_accuracy_arr)
+np.save(os.path.join(output_folder, 'training_accuracy_'+paramname+'_new'), train_accuracy_arr)
+np.save(os.path.join(output_folder, 'test_accuracy_'+paramname+'_new'), test_accuracy_arr)

@@ -5,12 +5,6 @@ import os
 
 
 def h5_to_slices(filepath, slice_size, stride, start_index):
-    """
-    Takes an hdf5 file with dataset 'data' containing a signal with 6 channels,
-    slices from start_index with given size and stride. Creates as many full slices
-    as possible.
-
-    """
     full_sig_arr = None
     with h5py.File(filepath) as hf:
         data = hf['new_data'][:,start_index:]
